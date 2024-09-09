@@ -154,16 +154,6 @@ def pairwise_group_compare_derivatives(bids_dir, fmriprep_dir,
     first_imgs = harmonize_affines(first_filenames, first_filenames[0])
     second_imgs = harmonize_affines(second_filenames, first_filenames[0])
 
-    first_masks_fn = get_masks(first_layout, task = first_task)
-    second_masks_fn = get_masks(second_layout, task = second_task)
-
-    first_masks = harmonize_affines(first_masks_fn, first_masks_fn[0], interpolation='nearest')
-    second_masks = harmonize_affines(second_masks_fn, first_masks_fn[0], interpolation='nearest')
-
-    from nilearn.masking import intersect_masks
-    first_mask_intersection = intersect_masks(first_masks)
-    second_mask_intersection = intersect_masks(second_masks)   
-
     first_imgs_rescaled = rescale_imgs(first_imgs, scaling=scaling)
     second_imgs_rescaled = rescale_imgs(second_imgs, scaling=scaling)
     
@@ -207,7 +197,7 @@ def read_xml(xml_file):
         labels[index] = name
     return labels
 
-def get_location_harvard_oxford(row, data, affine, xml_file):
+def get_location_harvard_oxford_old(row, data, affine, xml_file, prob_threshold=0):
 
     x = row['X']
     y = row['Y']
@@ -225,10 +215,7 @@ def get_location_harvard_oxford(row, data, affine, xml_file):
     # Sort volumes by probability
     sorted_volumes = sorted(enumerate(volumes), key=lambda x: x[1], reverse=True)
 
-    prob_threshold = 0.01
-
     # Print selected volumes with corresponding label names
-
     output = []
 
     for index, prob in sorted_volumes:
@@ -239,7 +226,7 @@ def get_location_harvard_oxford(row, data, affine, xml_file):
 
     return ' and '.join(output)
 
-def get_location_harvard_oxford_on_df(df):
+def get_location_harvard_oxford_on_df_old(df):
 
     import nibabel as nib
     xml_file = '/opt/fsl/data/atlases/HarvardOxford-Cortical.xml'
@@ -251,8 +238,77 @@ def get_location_harvard_oxford_on_df(df):
     # Get affine transformation matrix
     affine = nifti.affine
 
-    df['Location (Harvard-Oxford)'] = df.apply(lambda row: get_location_harvard_oxford(row, data, affine, xml_file), axis=1)
+    df['Location (Harvard-Oxford)'] = df.apply(lambda row: get_location_harvard_oxford_old(row, data, affine, xml_file), axis=1)
     return df
+
+def compute_mask_size(img):
+    voxels = np.count_nonzero(img.get_fdata())
+    voxel_size = np.prod(img.header.get_zooms())
+    return voxels * voxel_size
+
+def get_clusters_location_harvard_oxford(label_maps, prob_threshold=0.0):
+    import pandas as pd
+    from nilearn.image import load_img, resample_to_img, binarize_img, math_img
+    from nilearn.masking import apply_mask
+    cluster_table = pd.DataFrame()
+    if type(label_maps) is list:
+        positive_label_map = label_maps[0]
+        negative_label_map = label_maps[1]
+        positive_cluster_table = get_clusters_location_harvard_oxford(positive_label_map, 
+                                                                      prob_threshold=prob_threshold)
+        negative_cluster_table = get_clusters_location_harvard_oxford(negative_label_map,
+                                                                      prob_threshold=prob_threshold)
+
+        n_pos_clusters = len(positive_cluster_table)
+        
+        negative_cluster_table["Cluster id"] = negative_cluster_table.apply(lambda row: row["Cluster id"] + n_pos_clusters, axis=1)
+        
+        cluster_table = pd.concat([positive_cluster_table, negative_cluster_table], axis=0)
+    else:
+        levels = set(label_maps.get_fdata().flatten())
+        if 0 in levels:
+            levels.remove(0)
+        atlas = '/opt/fsl/data/atlases/HarvardOxford/HarvardOxford-cort-prob-1mm.nii.gz'
+        xml_file = '/opt/fsl/data/atlases/HarvardOxford-Cortical.xml'
+        atlas = load_img(atlas)
+        atlas_labels = read_xml(xml_file)
+
+        cluster_table = pd.DataFrame(columns=['Cluster id', 'Cluster size (mm3)', 'Location (Harvard-Oxford)'])
+        
+        for lvl in levels:
+            single_cluster_map = math_img('img == %s' % lvl, img=label_maps)
+            size = np.round(compute_mask_size(single_cluster_map))
+            single_cluster_map = resample_to_img(single_cluster_map, atlas, interpolation='continuous')
+            single_cluster_map = binarize_img(single_cluster_map, threshold="50%")
+            data = apply_mask(atlas, single_cluster_map)
+            
+            probabilities = []
+            for i in np.arange(atlas.shape[-1]):
+                prop = np.round(np.mean(data[i, :]), decimals=2)
+                probabilities.append(prop)
+            
+            sorted_probabilities = sorted(enumerate(probabilities), key=lambda x: x[1], reverse=True)
+
+            output = []
+            
+            for index, prob in sorted_probabilities:
+                label_name = atlas_labels.get(index, "Unknown")
+                if prob > prob_threshold:
+                    _str = f"{label_name} ({str(prob)} %)"
+                    output.append(_str)
+
+            if len(output) == 0:
+                string = "Non-cortical location"
+            else:
+                string = ' and '.join(output)
+
+            cluster_table.loc[len(cluster_table)] = [int(lvl), size, string]
+    return cluster_table
+
+def make_summarized_cluster_table(table):
+    summary = table
+    # table.loc[table['Cluster Size (mm3)'] > 0]
+    return summary
 
 def save_threshold_to_json(threshold, filename):
     import json
@@ -306,19 +362,29 @@ def perform_dataset_analysis(bids_dir,
     # find cluster tables
 
     clusters = {}
+    label_maps = {}
+    summarized_clusters = {}
 
     for maps1, maps2 in combinations(list(inputs.keys()), 2):
         clusters[(maps1, maps2)] = {}
+        label_maps[(maps1, maps2)] = {}
+        summarized_clusters[(maps1, maps2)] = {}
         for scaling in scaling_strategies:
             stat_img = results[(maps1, maps2)][scaling]['maps']['z_score']
             threshold = results[(maps1, maps2)][scaling]['threshold']
-            table = get_clusters_table(stat_img = stat_img,
+            table, label_map = get_clusters_table(stat_img = stat_img,
                               stat_threshold = threshold,
                               two_sided = True,
-                              cluster_threshold = 20)
+                              cluster_threshold = 20,
+                              return_label_maps=True)
             if not table.empty:
-                table = get_location_harvard_oxford_on_df(table)
-            clusters[(maps1, maps2)][scaling] = table
+                #table = get_location_harvard_oxford_on_df(table)
+                table_with_labeled_clusters = get_clusters_location_harvard_oxford(label_map, 
+                                                                                   prob_threshold=0.05)
+            
+            clusters[(maps1, maps2)][scaling] = table_with_labeled_clusters
+            label_maps[(maps1, maps2)][scaling] = label_map
+            summarized_clusters[(maps1, maps2)][scaling] = make_summarized_cluster_table(table_with_labeled_clusters)
             
     # save the results (z_score maps, figures, and cluster tables)
 
@@ -341,6 +407,11 @@ def perform_dataset_analysis(bids_dir,
                                    '%s_versus_%s_scaling-%s_z_score.csv'  % (maps1, maps2, scaling))
             print('Saving cluster table to %s' % cluster_table_filename)
             clusters[(maps1, maps2)][scaling].to_csv(cluster_table_filename, sep='\t')
+            
+            summarized_cluster_table_filename = join(output_dir,
+                                   '%s_versus_%s_scaling-%s_z_score_summary.csv'  % (maps1, maps2, scaling))
+            print('Saving summarized cluster table to %s' % summarized_cluster_table_filename)
+            summarized_clusters[(maps1, maps2)][scaling].to_csv(summarized_cluster_table_filename, sep='\t')
             
     for maps1, maps2 in combinations(list(inputs.keys()), 2):
         for scaling in ['wholebrain']:
@@ -368,7 +439,7 @@ warnings.filterwarnings('ignore')
 
 # ds004604 - 50 subjets, all with CO2 inhalation breathing challenge together with physiological monitoring.
 
-bids_dir_ds004604 = '/data/ds004604'
+bids_dir_ds004604 = '/mnt/hdd_10Tb_internal/openneuro/ds004604'
 
 inputs_ds004604 = {}
 inputs_ds004604['true-CVR']          = join(bids_dir_ds004604, 'derivatives', 'cvrmap_2.0.25')
@@ -380,7 +451,7 @@ perform_dataset_analysis(bids_dir_ds004604, inputs_ds004604)
 
 # ds005418 - 35 subjects, all with both CO2 inhalation breathing challenge together with physiological monitoring and a resting-state session.
 
-bids_dir_ds005418 = '/data/ds005418'
+bids_dir_ds005418 = '/mnt/hdd_10Tb_internal/openneuro/ds005418'
 
 inputs_ds005418 = {}
 inputs_ds005418['true-CVR']             = join(bids_dir_ds005418, 'derivatives', 'cvrmap_2.0.25')
