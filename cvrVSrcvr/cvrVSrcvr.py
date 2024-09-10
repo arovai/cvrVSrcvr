@@ -494,3 +494,5 @@ task_to_select_ds005418['vesselsignal-rs-rCVR'] = 'restingstate'
 
 print('Starting analysis for dataset ds005418')
 perform_dataset_analysis(bids_dir_ds005418, inputs_ds005418, task_to_select=task_to_select_ds005418)
+
+#todo: add cluster size statistics (mean size) for positive and negative separately.
