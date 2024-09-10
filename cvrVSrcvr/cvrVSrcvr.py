@@ -246,7 +246,10 @@ def compute_mask_size(img):
     voxel_size = np.prod(img.header.get_zooms())
     return voxels * voxel_size
 
-def get_clusters_location_harvard_oxford(label_maps, prob_threshold=0.0):
+def get_clusters_location_harvard_oxford(label_maps, prob_threshold=0.0, sign=None):
+    """
+        prob_threshold: str or float. If string, must be of the form '5%' or '17%'. If float, must be a p-value, e.g. '0.05' of '0.17'.
+    """
     import pandas as pd
     from nilearn.image import load_img, resample_to_img, binarize_img, math_img
     from nilearn.masking import apply_mask
@@ -255,9 +258,11 @@ def get_clusters_location_harvard_oxford(label_maps, prob_threshold=0.0):
         positive_label_map = label_maps[0]
         negative_label_map = label_maps[1]
         positive_cluster_table = get_clusters_location_harvard_oxford(positive_label_map, 
-                                                                      prob_threshold=prob_threshold)
+                                                                      prob_threshold=prob_threshold, 
+                                                                      sign='positive')
         negative_cluster_table = get_clusters_location_harvard_oxford(negative_label_map,
-                                                                      prob_threshold=prob_threshold)
+                                                                      prob_threshold=prob_threshold,
+                                                                      sign='negative')
 
         n_pos_clusters = len(positive_cluster_table)
         
@@ -273,7 +278,14 @@ def get_clusters_location_harvard_oxford(label_maps, prob_threshold=0.0):
         atlas = load_img(atlas)
         atlas_labels = read_xml(xml_file)
 
-        cluster_table = pd.DataFrame(columns=['Cluster id', 'Cluster size (mm3)', 'Location (Harvard-Oxford)'])
+        cluster_table = pd.DataFrame(columns=['Cluster id', 'Sign of mean cluster statistic', 'Cluster size (mm3)', 'Location (Harvard-Oxford)'])
+        
+        if type(prob_threshold) is str:
+            # Convert string to float percentage
+            prob_threshold = float(prob_threshold.split(sep='%')[0])
+        else:
+            # Convert p-value to percentage
+            prob_threshold *= 100
         
         for lvl in levels:
             single_cluster_map = math_img('img == %s' % lvl, img=label_maps)
@@ -302,7 +314,7 @@ def get_clusters_location_harvard_oxford(label_maps, prob_threshold=0.0):
             else:
                 string = ' and '.join(output)
 
-            cluster_table.loc[len(cluster_table)] = [int(lvl), size, string]
+            cluster_table.loc[len(cluster_table)] = [int(lvl), sign, size, string]
     return cluster_table
 
 def make_summarized_cluster_table(table):
@@ -451,7 +463,7 @@ perform_dataset_analysis(bids_dir_ds004604, inputs_ds004604)
 
 # ds005418 - 35 subjects, all with both CO2 inhalation breathing challenge together with physiological monitoring and a resting-state session.
 
-bids_dir_ds005418 = '/mnt/hdd_10Tb_internal/openneuro/ds005418'
+bids_dir_ds005418 = '/data/ds005418'
 
 inputs_ds005418 = {}
 inputs_ds005418['true-CVR']             = join(bids_dir_ds005418, 'derivatives', 'cvrmap_2.0.25')
