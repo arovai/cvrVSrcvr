@@ -253,6 +253,7 @@ def get_clusters_location_harvard_oxford(label_maps, prob_threshold=0.0, sign=No
     import pandas as pd
     from nilearn.image import load_img, resample_to_img, binarize_img, math_img
     from nilearn.masking import apply_mask
+    from os.path import isfile
     cluster_table = pd.DataFrame()
     if type(label_maps) is list:
         positive_label_map = label_maps[0]
@@ -273,8 +274,15 @@ def get_clusters_location_harvard_oxford(label_maps, prob_threshold=0.0, sign=No
         levels = set(label_maps.get_fdata().flatten())
         if 0 in levels:
             levels.remove(0)
+            
         atlas = '/opt/fsl/data/atlases/HarvardOxford/HarvardOxford-cort-prob-1mm.nii.gz'
         xml_file = '/opt/fsl/data/atlases/HarvardOxford-Cortical.xml'
+        
+        if not isfile(atlas):
+            atlas = '/data/atlases/HarvardOxford/HarvardOxford-cort-prob-1mm.nii.gz'
+        if not isfile(xml_file):
+            xml_file = '/data/atlases/HarvardOxford-Cortical.xml'
+        
         atlas = load_img(atlas)
         atlas_labels = read_xml(xml_file)
 
@@ -314,7 +322,7 @@ def get_clusters_location_harvard_oxford(label_maps, prob_threshold=0.0, sign=No
             else:
                 string = ' and '.join(output)
 
-            cluster_table.loc[len(cluster_table)] = [int(lvl), sign, size, string]
+            cluster_table.loc[len(cluster_table)] = [int(lvl), sign, int(size), string]
     return cluster_table
 
 def make_summarized_cluster_table(table):
@@ -418,12 +426,21 @@ def perform_dataset_analysis(bids_dir,
             cluster_table_filename = join(output_dir,
                                    '%s_versus_%s_scaling-%s_z_score.csv'  % (maps1, maps2, scaling))
             print('Saving cluster table to %s' % cluster_table_filename)
-            clusters[(maps1, maps2)][scaling].to_csv(cluster_table_filename, sep='\t')
+            clusters[(maps1, maps2)][scaling].to_csv(cluster_table_filename, sep='\t', index=False)
             
             summarized_cluster_table_filename = join(output_dir,
                                    '%s_versus_%s_scaling-%s_z_score_summary.csv'  % (maps1, maps2, scaling))
             print('Saving summarized cluster table to %s' % summarized_cluster_table_filename)
-            summarized_clusters[(maps1, maps2)][scaling].to_csv(summarized_cluster_table_filename, sep='\t')
+            summarized_clusters[(maps1, maps2)][scaling].to_csv(summarized_cluster_table_filename, sep='\t', index=False)
+            
+            latex_cluster_table_filename = join(output_dir,
+                                   '%s_versus_%s_scaling-%s_z_score.tex'  % (maps1, maps2, scaling))
+            print('Saving latex cluster table to %s' % latex_cluster_table_filename)
+            with open(latex_cluster_table_filename, 'w') as f:
+                f.write(clusters[(maps1, maps2)][scaling].to_latex(escape=True,
+                                                                   index=False,
+                                                                   column_format='cccl'))
+            
             
     for maps1, maps2 in combinations(list(inputs.keys()), 2):
         for scaling in ['wholebrain']:
@@ -451,7 +468,7 @@ warnings.filterwarnings('ignore')
 
 # ds004604 - 50 subjets, all with CO2 inhalation breathing challenge together with physiological monitoring.
 
-bids_dir_ds004604 = '/mnt/hdd_10Tb_internal/openneuro/ds004604'
+bids_dir_ds004604 = '/data/ds004604'
 
 inputs_ds004604 = {}
 inputs_ds004604['true-CVR']          = join(bids_dir_ds004604, 'derivatives', 'cvrmap_2.0.25')
