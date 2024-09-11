@@ -306,9 +306,12 @@ def get_clusters_location_harvard_oxford(label_maps, stat_img, prob_threshold=0.
             stat_img = harmonize_affines([stat_img], ref=single_cluster_map)[0]
             # .. and get mean statistical score
             mean_score = np.mean(apply_mask(stat_img, mask_img=single_cluster_map))
+            mean_score = np.round(mean_score, 2)
             
             # get size of the cluster, in mm3
-            size = np.round(compute_mask_size(single_cluster_map))
+            size = compute_mask_size(single_cluster_map)
+            size = np.round(size)
+            size = int(size)
             
             # find location probabilities in Harvard-Oxford atlas, sort in increasing order
             data = apply_mask(atlas, single_cluster_map)
@@ -334,14 +337,53 @@ def get_clusters_location_harvard_oxford(label_maps, stat_img, prob_threshold=0.
                 string = ' and '.join(output)
             
             # export to the cluster table
-            cluster_table.loc[len(cluster_table)] = [int(lvl), mean_score, int(size), string]
+            cluster_table.loc[len(cluster_table)] = [int(lvl),
+                                                     mean_score,
+                                                     size,
+                                                     string]
             
     return cluster_table
 
 def make_summarized_cluster_table(table):
-    summary = table
-    # table.loc[table['Cluster Size (mm3)'] > 0]
+    # cols of table are expected to be ['Cluster id', 'Cluster z-score mean', 'Cluster size (mm3)', 'Location (Harvard-Oxford)']
+    import pandas as pd
+    summary = pd.DataFrame(columns=['Cluster type', 'Number of clusters', 'Average size', 'Average z-score'])
+    
+    split_tables = {}
+    
+    # split positive and negative clusters
+    split_tables['pos'] = split_cortical_and_non_cortical(table.loc[table['Cluster z-score mean'] > 0])
+    split_tables['neg'] = split_cortical_and_non_cortical(table.loc[table['Cluster z-score mean'] < 0])
+            
+    summary.loc[len(summary)] = ['Cortical, >0', *get_clusters_stats(split_tables['pos']['cortical'])]
+    summary.loc[len(summary)] = ['Cortical, <0', *get_clusters_stats(split_tables['neg']['cortical'])]
+    summary.loc[len(summary)] = ['Non-Cortical, >0', *get_clusters_stats(split_tables['pos']['non-cortical'])]
+    summary.loc[len(summary)] = ['Non-Cortical, <0', *get_clusters_stats(split_tables['neg']['non-cortical'])]
+    
     return summary
+
+def split_cortical_and_non_cortical(table):
+    cortical = table.loc[(table['Location (Harvard-Oxford)'] == "Non-cortical location")]
+    non_cortical = table.loc[~(table['Location (Harvard-Oxford)'] == "Non-cortical location")]
+    return {'cortical': cortical, 'non-cortical': non_cortical}
+    
+def get_clusters_stats(table):
+    # get cluster number
+    n = len(table)
+    # get average cluster size, in mm3
+    mean_size = np.mean(table['Cluster size (mm3)'].values)
+    # get average statistical score
+    mean_stat = np.dot(table['Cluster z-score mean'].values,
+                                 table['Cluster size (mm3)'].values)/np.sum(table['Cluster size (mm3)'].values)
+    
+    if n == 0:
+        mean_size = 0
+        mean_stat = 'n/a'
+    else:
+        mean_size = int(np.round(mean_size))
+        mean_stat = np.round(mean_stat, 2)
+    
+    return [n, mean_size, mean_stat]
 
 def save_threshold_to_json(threshold, filename):
     import json
@@ -429,7 +471,7 @@ def perform_dataset_analysis(bids_dir,
             zmap_filename = join(output_dir,
                                    '%s_versus_%s_scaling-%s_z_score.nii.gz'  % (maps1, maps2, scaling))
             json_filename = join(output_dir,
-                                   '%s_versus_%s_scaling-%s_z_score.json'  % (maps1, maps2, scaling))
+                                   '%s_versus_%s_scaling-%s_z_score.json' % (maps1, maps2, scaling))
             
             print('Saving z-score map to %s' % zmap_filename)
             results[(maps1, maps2)][scaling]['maps']['z_score'].to_filename(zmap_filename)
@@ -438,17 +480,25 @@ def perform_dataset_analysis(bids_dir,
             save_threshold_to_json(results[(maps1, maps2)][scaling]['threshold'], json_filename)
 
             cluster_table_filename = join(output_dir,
-                                   '%s_versus_%s_scaling-%s_z_score.csv'  % (maps1, maps2, scaling))
+                                   '%s_versus_%s_scaling-%s_z_score.csv' % (maps1, maps2, scaling))
             print('Saving cluster table to %s' % cluster_table_filename)
             clusters[(maps1, maps2)][scaling].to_csv(cluster_table_filename, sep='\t', index=False)
             
-            #summarized_cluster_table_filename = join(output_dir,
-            #                       '%s_versus_%s_scaling-%s_z_score_summary.csv'  % (maps1, maps2, scaling))
-            #print('Saving summarized cluster table to %s' % summarized_cluster_table_filename)
-            #summarized_clusters[(maps1, maps2)][scaling].to_csv(summarized_cluster_table_filename, sep='\t', index=False)
+            summarized_cluster_table_filename = join(output_dir,
+                                   '%s_versus_%s_scaling-%s_z_score_summary.tex' % (maps1, maps2, scaling))
+            print('Saving summarized cluster table to %s' % summarized_cluster_table_filename)
+            #summarized_clusters[(maps1, maps2)][scaling].to_csv(summarized_cluster_table_filename,
+            #                                                    sep='\t',
+            #                                                    index=False)
+            with open(summarized_cluster_table_filename, 'w') as f:
+                f.write(summarized_clusters[(maps1, maps2)][scaling].to_latex(escape=True,
+                                                                   index=False,
+                                                                   column_format='cccc'))
+            
+            
             
             latex_cluster_table_filename = join(output_dir,
-                                   '%s_versus_%s_scaling-%s_z_score.tex'  % (maps1, maps2, scaling))
+                                   '%s_versus_%s_scaling-%s_z_score.tex' % (maps1, maps2, scaling))
             print('Saving latex cluster table to %s' % latex_cluster_table_filename)
             with open(latex_cluster_table_filename, 'w') as f:
                 f.write(clusters[(maps1, maps2)][scaling].to_latex(escape=True,
