@@ -296,10 +296,21 @@ def get_clusters_location_harvard_oxford(label_maps, stat_img, prob_threshold=0.
             prob_threshold *= 100
         
         for lvl in levels:
+            # select only one cluster and make a mask out of it
             single_cluster_map = math_img('img == %s' % lvl, img=label_maps)
-            size = np.round(compute_mask_size(single_cluster_map))
             single_cluster_map = resample_to_img(single_cluster_map, atlas, interpolation='continuous')
             single_cluster_map = binarize_img(single_cluster_map, threshold="50%")
+            
+            
+            # make sure statistical image has same affine as cluster label maps
+            stat_img = harmonize_affines([stat_img], ref=single_cluster_map)[0]
+            # .. and get mean statistical score
+            mean_score = np.mean(apply_mask(stat_img, mask_img=single_cluster_map))
+            
+            # get size of the cluster, in mm3
+            size = np.round(compute_mask_size(single_cluster_map))
+            
+            # find location probabilities in Harvard-Oxford atlas, sort in increasing order
             data = apply_mask(atlas, single_cluster_map)
             
             probabilities = []
@@ -321,11 +332,10 @@ def get_clusters_location_harvard_oxford(label_maps, stat_img, prob_threshold=0.
                 string = "Non-cortical location"
             else:
                 string = ' and '.join(output)
-
-            stat_img = harmonize_affines([stat_img], ref=single_cluster_map)[0]
-            mean_score = np.mean(apply_mask(stat_img, mask_img=single_cluster_map))
-
+            
+            # export to the cluster table
             cluster_table.loc[len(cluster_table)] = [int(lvl), mean_score, int(size), string]
+            
     return cluster_table
 
 def make_summarized_cluster_table(table):
