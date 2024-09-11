@@ -246,7 +246,7 @@ def compute_mask_size(img):
     voxel_size = np.prod(img.header.get_zooms())
     return voxels * voxel_size
 
-def get_clusters_location_harvard_oxford(label_maps, prob_threshold=0.0, sign=None):
+def get_clusters_location_harvard_oxford(label_maps, stat_img, prob_threshold=0.0):
     """
         prob_threshold: str or float. If string, must be of the form '5%' or '17%'. If float, must be a p-value, e.g. '0.05' of '0.17'.
     """
@@ -258,12 +258,12 @@ def get_clusters_location_harvard_oxford(label_maps, prob_threshold=0.0, sign=No
     if type(label_maps) is list:
         positive_label_map = label_maps[0]
         negative_label_map = label_maps[1]
-        positive_cluster_table = get_clusters_location_harvard_oxford(positive_label_map, 
-                                                                      prob_threshold=prob_threshold, 
-                                                                      sign='positive')
+        positive_cluster_table = get_clusters_location_harvard_oxford(positive_label_map,
+                                                                      stat_img,
+                                                                      prob_threshold=prob_threshold)
         negative_cluster_table = get_clusters_location_harvard_oxford(negative_label_map,
-                                                                      prob_threshold=prob_threshold,
-                                                                      sign='negative')
+                                                                      stat_img,
+                                                                      prob_threshold=prob_threshold)
 
         n_pos_clusters = len(positive_cluster_table)
         
@@ -286,7 +286,7 @@ def get_clusters_location_harvard_oxford(label_maps, prob_threshold=0.0, sign=No
         atlas = load_img(atlas)
         atlas_labels = read_xml(xml_file)
 
-        cluster_table = pd.DataFrame(columns=['Cluster id', 'Sign of mean cluster statistic', 'Cluster size (mm3)', 'Location (Harvard-Oxford)'])
+        cluster_table = pd.DataFrame(columns=['Cluster id', 'Cluster z-score mean', 'Cluster size (mm3)', 'Location (Harvard-Oxford)'])
         
         if type(prob_threshold) is str:
             # Convert string to float percentage
@@ -322,7 +322,10 @@ def get_clusters_location_harvard_oxford(label_maps, prob_threshold=0.0, sign=No
             else:
                 string = ' and '.join(output)
 
-            cluster_table.loc[len(cluster_table)] = [int(lvl), sign, int(size), string]
+            stat_img = harmonize_affines([stat_img], ref=single_cluster_map)[0]
+            mean_score = np.mean(apply_mask(stat_img, mask_img=single_cluster_map))
+
+            cluster_table.loc[len(cluster_table)] = [int(lvl), mean_score, int(size), string]
     return cluster_table
 
 def make_summarized_cluster_table(table):
@@ -399,7 +402,8 @@ def perform_dataset_analysis(bids_dir,
                               return_label_maps=True)
             if not table.empty:
                 #table = get_location_harvard_oxford_on_df(table)
-                table_with_labeled_clusters = get_clusters_location_harvard_oxford(label_map, 
+                table_with_labeled_clusters = get_clusters_location_harvard_oxford(label_map,
+                                                                                   stat_img,
                                                                                    prob_threshold=0.05)
             
             clusters[(maps1, maps2)][scaling] = table_with_labeled_clusters
@@ -494,5 +498,3 @@ task_to_select_ds005418['vesselsignal-rs-rCVR'] = 'restingstate'
 
 print('Starting analysis for dataset ds005418')
 perform_dataset_analysis(bids_dir_ds005418, inputs_ds005418, task_to_select=task_to_select_ds005418)
-
-#todo: add cluster size statistics (mean size) for positive and negative separately.
