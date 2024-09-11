@@ -558,3 +558,4 @@ task_to_select_ds005418['vesselsignal-rs-rCVR'] = 'restingstate'
 
 print('Starting analysis for dataset ds005418')
 perform_dataset_analysis(bids_dir_ds005418, inputs_ds005418, task_to_select=task_to_select_ds005418)
+# to do : fix number of printed decimals for floats in panda.to_latex, as it prints more than actually kept when rounding
