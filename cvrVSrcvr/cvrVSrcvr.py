@@ -432,10 +432,10 @@ def perform_dataset_analysis(bids_dir,
             print('Saving cluster table to %s' % cluster_table_filename)
             clusters[(maps1, maps2)][scaling].to_csv(cluster_table_filename, sep='\t', index=False)
             
-            summarized_cluster_table_filename = join(output_dir,
-                                   '%s_versus_%s_scaling-%s_z_score_summary.csv'  % (maps1, maps2, scaling))
-            print('Saving summarized cluster table to %s' % summarized_cluster_table_filename)
-            summarized_clusters[(maps1, maps2)][scaling].to_csv(summarized_cluster_table_filename, sep='\t', index=False)
+            #summarized_cluster_table_filename = join(output_dir,
+            #                       '%s_versus_%s_scaling-%s_z_score_summary.csv'  % (maps1, maps2, scaling))
+            #print('Saving summarized cluster table to %s' % summarized_cluster_table_filename)
+            #summarized_clusters[(maps1, maps2)][scaling].to_csv(summarized_cluster_table_filename, sep='\t', index=False)
             
             latex_cluster_table_filename = join(output_dir,
                                    '%s_versus_%s_scaling-%s_z_score.tex'  % (maps1, maps2, scaling))
