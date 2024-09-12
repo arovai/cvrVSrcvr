@@ -347,7 +347,7 @@ def get_clusters_location_harvard_oxford(label_maps, stat_img, prob_threshold=0.
 def make_summarized_cluster_table(table):
     # cols of table are expected to be ['Cluster id', 'Cluster z-score mean', 'Cluster size (mm3)', 'Location (Harvard-Oxford)']
     import pandas as pd
-    summary = pd.DataFrame(columns=['Cluster type', 'Number of clusters', 'Average size', 'Average z-score'])
+    summary = pd.DataFrame(columns=['Cluster type', 'Number of clusters', 'Average size (mm3)', 'Average z-score'])
     
     split_tables = {}
     
@@ -493,6 +493,7 @@ def perform_dataset_analysis(bids_dir,
             with open(summarized_cluster_table_filename, 'w') as f:
                 f.write(summarized_clusters[(maps1, maps2)][scaling].to_latex(escape=True,
                                                                    index=False,
+                                                                   float_format="%.2f",
                                                                    column_format='cccc'))
             
             
@@ -503,6 +504,7 @@ def perform_dataset_analysis(bids_dir,
             with open(latex_cluster_table_filename, 'w') as f:
                 f.write(clusters[(maps1, maps2)][scaling].to_latex(escape=True,
                                                                    index=False,
+                                                                   float_format="%.2f",
                                                                    column_format='cccl'))
                         
     for maps1, maps2 in combinations(list(inputs.keys()), 2):
@@ -522,22 +524,8 @@ def perform_dataset_analysis(bids_dir,
                              colorbar=True,
                              title=plot_title,
                              output_file=plot_filename)
-            
-    label1 = "true CVR versus global signal rCVR"
-    df1 = summarized_clusters[('true-CVR', 'globalsignal-rCVR')]['wholebrain']
-    df1['Comparison'] = label1
-
-    label2 = "true CVR versus vessel signal rCVR"
-    df2 = summarized_clusters[('true-CVR', 'vesselsignal-rCVR')]['wholebrain']
-    df2['Comparison'] = label2
-
-    label3 = "global signal rCVR versus vessel signal rCVR"
-    df3 = summarized_clusters[('globalsignal-rCVR', 'vesselsignal-rCVR')]['wholebrain']
-    df3['Comparison'] = label3
-
-    combine_three_tables_and_save(df1, df2, df3, label1, label2, label3, join(output_dir, 'cluster_summary.tex'))
-        
-    return results, clusters
+                
+    return results, clusters, summarized_clusters, output_dir
 
 def combine_three_tables_and_save(df1, df2, df3, label1, label2, label3, filename):
     import pandas as pd
@@ -550,22 +538,23 @@ def combine_three_tables_and_save(df1, df2, df3, label1, label2, label3, filenam
     combined_df = move_column_to_first(combined_df, 'Comparison')
     
     # Convert DataFrame to LaTeX string
-    latex_str = combined_df.to_latex(index=False, escape=False, column_format='c|cccc')
+    latex_str = combined_df.to_latex(index=False,
+                                     escape=False,
+                                     float_format="%.2f",
+                                     column_format='c|cccc')
     # Apply the customization function
-    custom_latex_str = customize_latex_with_multirow(latex_str, label1, label2, label3)
+    custom_latex_str = customize_latex_with_multirow(latex_str, [label1, label2, label3], [len(df1), len(df2), len(df3)])
 
     # Save to a .tex file
     with open(filename, 'w') as f:
         f.write(custom_latex_str)
 
-def customize_latex_with_multirow(latex_str, label1, label2, label3):
+def customize_latex_with_multirow(latex_str, labels, row_numbers):
     # Split the LaTeX string into lines
     lines = latex_str.splitlines()
     
-    # Find the number of rows for each DataFrame
-    num_rows_df1 = len(df1)
-    num_rows_df2 = len(df2)
-    num_rows_df3 = len(df3)
+    label1, label2, label3 = labels
+    num_rows_df1, num_rows_df2, num_rows_df3= row_numbers
     
     # Correctly format the multirow string with escaped curly braces
     multirow_label1 = f'\\multirow{{{num_rows_df1}}}{{*}}{{{label1}}}'
@@ -641,7 +630,21 @@ inputs_ds004604['globalsignal-rCVR'] = join(bids_dir_ds004604, 'derivatives', 'c
 inputs_ds004604['vesselsignal-rCVR'] = join(bids_dir_ds004604, 'derivatives', 'cvrmap_2.0.25_vs')
 
 print('Starting analysis for dataset ds004604')
-perform_dataset_analysis(bids_dir_ds004604, inputs_ds004604)
+_, _, summarized_clusters_ds004604, output_dir_ds004604 = perform_dataset_analysis(bids_dir_ds004604, inputs_ds004604)
+
+label1 = "true CVR versus global signal rCVR"
+df1 = summarized_clusters_ds004604[('true-CVR', 'globalsignal-rCVR')]['wholebrain']
+df1['Comparison'] = label1
+label2 = "true CVR versus vessel signal rCVR"
+df2 = summarized_clusters_ds004604[('true-CVR', 'vesselsignal-rCVR')]['wholebrain']
+df2['Comparison'] = label2
+label3 = "global signal rCVR versus vessel signal rCVR"
+df3 = summarized_clusters_ds004604[('globalsignal-rCVR', 'vesselsignal-rCVR')]['wholebrain']
+df3['Comparison'] = label3
+combine_three_tables_and_save(df1, df2, df3,
+                              label1, label2, label3,
+                              join(output_dir_ds004604, 'ds004604_cluster_summary.tex'))
+
 
 # ds005418 - 35 subjects, all with both CO2 inhalation breathing challenge together with physiological monitoring and a resting-state session.
 
@@ -658,5 +661,18 @@ task_to_select_ds005418['globalsignal-rs-rCVR'] = 'restingstate'
 task_to_select_ds005418['vesselsignal-rs-rCVR'] = 'restingstate'
 
 print('Starting analysis for dataset ds005418')
-perform_dataset_analysis(bids_dir_ds005418, inputs_ds005418, task_to_select=task_to_select_ds005418)
-# to do : fix number of printed decimals for floats in panda.to_latex, as it prints more than actually kept when rounding
+_, _, summarized_clusters_ds005418, output_dir_ds005418 = perform_dataset_analysis(bids_dir_ds005418, inputs_ds005418, task_to_select=task_to_select_ds005418)
+
+label1 = "true CVR versus global signal rs-rCVR"
+df1 = summarized_clusters_ds005418[('true-CVR', 'globalsignal-rs-rCVR')]['wholebrain']
+df1['Comparison'] = label1
+label2 = "true CVR versus vessel signal rs-rCVR"
+df2 = summarized_clusters_ds005418[('true-CVR', 'vesselsignal-rs-rCVR')]['wholebrain']
+df2['Comparison'] = label2
+label3 = "global signal rs-rCVR versus vessel signal rs-rCVR"
+df3 = summarized_clusters_ds005418[('globalsignal-rs-rCVR', 'vesselsignal-rs-rCVR')]['wholebrain']
+df3['Comparison'] = label3
+combine_three_tables_and_save(df1, df2, df3,
+                              label1, label2, label3,
+                              join(output_dir_ds005418, 'ds005418_cluster_summary.tex'))
+
