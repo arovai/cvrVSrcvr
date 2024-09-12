@@ -504,8 +504,7 @@ def perform_dataset_analysis(bids_dir,
                 f.write(clusters[(maps1, maps2)][scaling].to_latex(escape=True,
                                                                    index=False,
                                                                    column_format='cccl'))
-            
-            
+                        
     for maps1, maps2 in combinations(list(inputs.keys()), 2):
         for scaling in ['wholebrain']:
             plot_filename = join(output_dir,
@@ -524,7 +523,109 @@ def perform_dataset_analysis(bids_dir,
                              title=plot_title,
                              output_file=plot_filename)
             
+    label1 = "true CVR versus global signal rCVR"
+    df1 = summarized_clusters[('true-CVR', 'globalsignal-rCVR')]['wholebrain']
+    df1['Comparison'] = label1
+
+    label2 = "true CVR versus vessel signal rCVR"
+    df2 = summarized_clusters[('true-CVR', 'vesselsignal-rCVR')]['wholebrain']
+    df2['Comparison'] = label2
+
+    label3 = "global signal rCVR versus vessel signal rCVR"
+    df3 = summarized_clusters[('globalsignal-rCVR', 'vesselsignal-rCVR')]['wholebrain']
+    df3['Comparison'] = label3
+
+    combine_three_tables_and_save(df1, df2, df3, label1, label2, label3, join(output_dir, 'cluster_summary.tex'))
+        
     return results, clusters
+
+def combine_three_tables_and_save(df1, df2, df3, label1, label2, label3, filename):
+    import pandas as pd
+    
+    df1['Comparison'] = label1
+    df2['Comparison'] = label2
+    df3['Comparison'] = label3
+    
+    combined_df = pd.concat([df1, df2, df3], ignore_index=True)
+    combined_df = move_column_to_first(combined_df, 'Comparison')
+    
+    # Convert DataFrame to LaTeX string
+    latex_str = combined_df.to_latex(index=False, escape=False, column_format='c|cccc')
+    # Apply the customization function
+    custom_latex_str = customize_latex_with_multirow(latex_str, label1, label2, label3)
+
+    # Save to a .tex file
+    with open(filename, 'w') as f:
+        f.write(custom_latex_str)
+
+def customize_latex_with_multirow(latex_str, label1, label2, label3):
+    # Split the LaTeX string into lines
+    lines = latex_str.splitlines()
+    
+    # Find the number of rows for each DataFrame
+    num_rows_df1 = len(df1)
+    num_rows_df2 = len(df2)
+    num_rows_df3 = len(df3)
+    
+    # Correctly format the multirow string with escaped curly braces
+    multirow_label1 = f'\\multirow{{{num_rows_df1}}}{{*}}{{{label1}}}'
+    multirow_label2 = f'\\multirow{{{num_rows_df2}}}{{*}}{{{label2}}}'
+    multirow_label3 = f'\\multirow{{{num_rows_df3}}}{{*}}{{{label3}}}'
+
+    # Modify the first occurrence of label1 with \multirow
+    found_first_label1 = False
+    for i, line in enumerate(lines):
+        if label1 in line:
+            if found_first_label1:
+                lines[i] = lines[i].replace(label1, '')
+            else:
+                found_first_label1 = True
+                lines[i] = line.replace(label1, multirow_label1, 1)
+                cline_position1 = i + num_rows_df1
+    
+    # Modify the first occurrence of label2 with \multirow
+    found_first_label2 = False
+    for i, line in enumerate(lines):
+        if label2 in line:
+            if found_first_label2:
+                lines[i] = lines[i].replace(label2, '')
+            else:
+                found_first_label2 = True
+                lines[i] = line.replace(label2, multirow_label2, 1)
+                cline_position2 = i + num_rows_df2 + 1
+                
+    # Modify the first occurrence of label2 with \multirow
+    found_first_label3 = False
+    for i, line in enumerate(lines):
+        if label3 in line:
+            if found_first_label3:
+                lines[i] = lines[i].replace(label3, '')
+            else:
+                found_first_label3 = True
+                lines[i] = line.replace(label3, multirow_label3, 1)
+
+    lines.insert(cline_position1, '\\midrule')
+    lines.insert(cline_position2, '\\midrule')
+
+    # Rejoin lines into a single LaTeX string
+    return '\n'.join(lines)
+
+def move_column_to_first(df, column_name):
+    """
+    Moves the specified column to the first position in the DataFrame.
+
+    Parameters:
+    df (pd.DataFrame): The DataFrame to modify.
+    column_name (str): The name of the column to move to the first position.
+
+    Returns:
+    pd.DataFrame: The modified DataFrame with the specified column moved to the first position.
+    """
+    # Pop the specified column
+    col = df.pop(column_name)
+    # Insert the column at the first position
+    df.insert(0, column_name, col)
+    return df
 
 # main script
 
