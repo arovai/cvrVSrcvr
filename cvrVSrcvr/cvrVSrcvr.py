@@ -246,7 +246,7 @@ def compute_mask_size(img):
     voxel_size = np.prod(img.header.get_zooms())
     return voxels * voxel_size
 
-def get_clusters_location_harvard_oxford(label_maps, stat_img, prob_threshold=0.0):
+def get_clusters_location_harvard_oxford(label_maps=None, stat_img=None, prob_threshold=0.0):
     """
         prob_threshold: str or float. If string, must be of the form '5%' or '17%'. If float, must be a p-value, e.g. '0.05' of '0.17'.
     """
@@ -255,111 +255,119 @@ def get_clusters_location_harvard_oxford(label_maps, stat_img, prob_threshold=0.
     from nilearn.masking import apply_mask
     from os.path import isfile
     cluster_table = pd.DataFrame()
-    if type(label_maps) is list:
-        positive_label_map = label_maps[0]
-        negative_label_map = label_maps[1]
-        positive_cluster_table = get_clusters_location_harvard_oxford(positive_label_map,
-                                                                      stat_img,
-                                                                      prob_threshold=prob_threshold)
-        negative_cluster_table = get_clusters_location_harvard_oxford(negative_label_map,
-                                                                      stat_img,
-                                                                      prob_threshold=prob_threshold)
-
-        n_pos_clusters = len(positive_cluster_table)
+    
+    if label_maps is not None:
         
-        negative_cluster_table["Cluster id"] = negative_cluster_table.apply(lambda row: row["Cluster id"] + n_pos_clusters, axis=1)
-        
-        cluster_table = pd.concat([positive_cluster_table, negative_cluster_table], axis=0)
-    else:
-        levels = set(label_maps.get_fdata().flatten())
-        if 0 in levels:
-            levels.remove(0)
+        if type(label_maps) is list:
+            positive_label_map = label_maps[0]
+            negative_label_map = label_maps[1]
+            positive_cluster_table = get_clusters_location_harvard_oxford(positive_label_map,
+                                                                          stat_img,
+                                                                          prob_threshold=prob_threshold)
+            negative_cluster_table = get_clusters_location_harvard_oxford(negative_label_map,
+                                                                          stat_img,
+                                                                          prob_threshold=prob_threshold)
+    
+            n_pos_clusters = len(positive_cluster_table)
             
-        atlas = '/opt/fsl/data/atlases/HarvardOxford/HarvardOxford-cort-prob-1mm.nii.gz'
-        xml_file = '/opt/fsl/data/atlases/HarvardOxford-Cortical.xml'
-        
-        if not isfile(atlas):
-            atlas = '/data/atlases/HarvardOxford/HarvardOxford-cort-prob-1mm.nii.gz'
-        if not isfile(xml_file):
-            xml_file = '/data/atlases/HarvardOxford-Cortical.xml'
-        
-        atlas = load_img(atlas)
-        atlas_labels = read_xml(xml_file)
-
-        cluster_table = pd.DataFrame(columns=['Cluster id', 'Cluster z-score mean', 'Cluster size (mm3)', 'Location (Harvard-Oxford)'])
-        
-        if type(prob_threshold) is str:
-            # Convert string to float percentage
-            prob_threshold = float(prob_threshold.split(sep='%')[0])
+            negative_cluster_table["Cluster id"] = negative_cluster_table.apply(lambda row: row["Cluster id"] + n_pos_clusters, axis=1)
+            
+            cluster_table = pd.concat([positive_cluster_table, negative_cluster_table], axis=0)
         else:
-            # Convert p-value to percentage
-            prob_threshold *= 100
-        
-        for lvl in levels:
-            # select only one cluster and make a mask out of it
-            single_cluster_map = math_img('img == %s' % lvl, img=label_maps)
-            single_cluster_map = resample_to_img(single_cluster_map, atlas, interpolation='continuous')
-            single_cluster_map = binarize_img(single_cluster_map, threshold="50%")
+            levels = set(label_maps.get_fdata().flatten())
+            if 0 in levels:
+                levels.remove(0)
+                
+            atlas = '/opt/fsl/data/atlases/HarvardOxford/HarvardOxford-cort-prob-1mm.nii.gz'
+            xml_file = '/opt/fsl/data/atlases/HarvardOxford-Cortical.xml'
             
+            if not isfile(atlas):
+                atlas = '/data/atlases/HarvardOxford/HarvardOxford-cort-prob-1mm.nii.gz'
+            if not isfile(xml_file):
+                xml_file = '/data/atlases/HarvardOxford-Cortical.xml'
             
-            # make sure statistical image has same affine as cluster label maps
-            stat_img = harmonize_affines([stat_img], ref=single_cluster_map)[0]
-            # .. and get mean statistical score
-            mean_score = np.mean(apply_mask(stat_img, mask_img=single_cluster_map))
-            mean_score = np.round(mean_score, 2)
+            atlas = load_img(atlas)
+            atlas_labels = read_xml(xml_file)
+    
+            cluster_table = pd.DataFrame(columns=['Cluster id', 'Cluster z-score mean', 'Cluster size (mm3)', 'Location (Harvard-Oxford)'])
             
-            # get size of the cluster, in mm3
-            size = compute_mask_size(single_cluster_map)
-            size = np.round(size)
-            size = int(size)
-            
-            # find location probabilities in Harvard-Oxford atlas, sort in increasing order
-            data = apply_mask(atlas, single_cluster_map)
-            
-            probabilities = []
-            for i in np.arange(atlas.shape[-1]):
-                prop = np.round(np.mean(data[i, :]), decimals=2)
-                probabilities.append(prop)
-            
-            sorted_probabilities = sorted(enumerate(probabilities), key=lambda x: x[1], reverse=True)
-
-            output = []
-            
-            for index, prob in sorted_probabilities:
-                label_name = atlas_labels.get(index, "Unknown")
-                if prob > prob_threshold:
-                    _str = f"{label_name} ({str(prob)} %)"
-                    output.append(_str)
-
-            if len(output) == 0:
-                string = "Non-cortical location"
+            if type(prob_threshold) is str:
+                # Convert string to float percentage
+                prob_threshold = float(prob_threshold.split(sep='%')[0])
             else:
-                string = ' and '.join(output)
+                # Convert p-value to percentage
+                prob_threshold *= 100
             
-            # export to the cluster table
-            cluster_table.loc[len(cluster_table)] = [int(lvl),
-                                                     mean_score,
-                                                     size,
-                                                     string]
+            for lvl in levels:
+                # select only one cluster and make a mask out of it
+                single_cluster_map = math_img('img == %s' % lvl, img=label_maps)
+                single_cluster_map = resample_to_img(single_cluster_map, atlas, interpolation='continuous')
+                single_cluster_map = binarize_img(single_cluster_map, threshold="50%")
+                
+                
+                # make sure statistical image has same affine as cluster label maps
+                stat_img = harmonize_affines([stat_img], ref=single_cluster_map)[0]
+                # .. and get mean statistical score
+                mean_score = np.mean(apply_mask(stat_img, mask_img=single_cluster_map))
+                mean_score = np.round(mean_score, 2)
+                
+                # get size of the cluster, in mm3
+                size = compute_mask_size(single_cluster_map)
+                size = np.round(size)
+                size = int(size)
+                
+                # find location probabilities in Harvard-Oxford atlas, sort in increasing order
+                data = apply_mask(atlas, single_cluster_map)
+                
+                probabilities = []
+                for i in np.arange(atlas.shape[-1]):
+                    prop = np.round(np.mean(data[i, :]), decimals=2)
+                    probabilities.append(prop)
+                
+                sorted_probabilities = sorted(enumerate(probabilities), key=lambda x: x[1], reverse=True)
+    
+                output = []
+                
+                for index, prob in sorted_probabilities:
+                    label_name = atlas_labels.get(index, "Unknown")
+                    if prob > prob_threshold:
+                        _str = f"{label_name} ({str(prob)} %)"
+                        output.append(_str)
+    
+                if len(output) == 0:
+                    string = "Non-cortical location"
+                else:
+                    string = ' and '.join(output)
+                
+                # export to the cluster table
+                cluster_table.loc[len(cluster_table)] = [int(lvl),
+                                                         mean_score,
+                                                         size,
+                                                         string]
+    else:
+        cluster_table = pd.DataFrame(columns=['Cluster id', 'Cluster z-score mean', 'Cluster size (mm3)', 'Location (Harvard-Oxford)'])
             
     return cluster_table
 
 def make_summarized_cluster_table(table):
     # cols of table are expected to be ['Cluster id', 'Cluster z-score mean', 'Cluster size (mm3)', 'Location (Harvard-Oxford)']
     import pandas as pd
+    
     summary = pd.DataFrame(columns=['Cluster type', 'Number of clusters', 'Average size (mm3)', 'Average z-score'])
     
-    split_tables = {}
-    
-    # split positive and negative clusters
-    split_tables['pos'] = split_cortical_and_non_cortical(table.loc[table['Cluster z-score mean'] > 0])
-    split_tables['neg'] = split_cortical_and_non_cortical(table.loc[table['Cluster z-score mean'] < 0])
-            
-    summary.loc[len(summary)] = ['Cortical, >0', *get_clusters_stats(split_tables['pos']['cortical'])]
-    summary.loc[len(summary)] = ['Cortical, <0', *get_clusters_stats(split_tables['neg']['cortical'])]
-    summary.loc[len(summary)] = ['Non-Cortical, >0', *get_clusters_stats(split_tables['pos']['non-cortical'])]
-    summary.loc[len(summary)] = ['Non-Cortical, <0', *get_clusters_stats(split_tables['neg']['non-cortical'])]
-    
+    if not table.empty:
+        
+        split_tables = {}
+        
+        # split positive and negative clusters
+        split_tables['pos'] = split_cortical_and_non_cortical(table.loc[table['Cluster z-score mean'] > 0])
+        split_tables['neg'] = split_cortical_and_non_cortical(table.loc[table['Cluster z-score mean'] < 0])
+                
+        summary.loc[len(summary)] = ['Cortical, >0', *get_clusters_stats(split_tables['pos']['cortical'])]
+        summary.loc[len(summary)] = ['Cortical, <0', *get_clusters_stats(split_tables['neg']['cortical'])]
+        summary.loc[len(summary)] = ['Non-Cortical, >0', *get_clusters_stats(split_tables['pos']['non-cortical'])]
+        summary.loc[len(summary)] = ['Non-Cortical, <0', *get_clusters_stats(split_tables['neg']['non-cortical'])]
+        
     return summary
 
 def split_cortical_and_non_cortical(table):
@@ -457,6 +465,8 @@ def perform_dataset_analysis(bids_dir,
                 table_with_labeled_clusters = get_clusters_location_harvard_oxford(label_map,
                                                                                    stat_img,
                                                                                    prob_threshold=0.05)
+            else:
+                table_with_labeled_clusters = get_clusters_location_harvard_oxford()
             
             clusters[(maps1, maps2)][scaling] = table_with_labeled_clusters
             label_maps[(maps1, maps2)][scaling] = label_map
